@@ -6,10 +6,12 @@ use cosmwasm_std::{
 };
 
 use cw2::set_contract_version;
-use cw20::{Cw20ReceiveMsg, Expiration};
+// use cw20::{Cw20ReceiveMsg, Expiration};
+use cw20::{Cw20ReceiveMsg};
 use cw20_base;
 use cw721::Cw721ReceiveMsg;
-use cw_utils;
+use cw_utils::{self, one_coin, PaymentError, nonpayable, ensure_from_older_version, Duration, Expiration};
+
 // use cw2::set_contract_version;
 
 use crate::error::ContractError;
@@ -42,11 +44,34 @@ where
     fn execute_deposit(
         &self,
         deps: DepsMut,
+        env:Env,
         info: MessageInfo,
     ) -> Result<Response<C>, ContractError> {
         let sender = info.sender.clone().into_string();
 
-        let d_coins = info.funds[0].clone();
+
+        // Poor alternative to using one_coin()
+        //let d_coins = info.funds[0].clone();
+
+        // Making sure there is only one coin and handling the possible errors.
+        let d_coins = match one_coin(&info) {
+            Ok(coin) => coin,
+            Err(err) => {
+                match err {
+                    PaymentError::NoFunds{} => {return Err(ContractError::NoFunds {  });}
+                    PaymentError::MultipleDenoms{} => {return Err(ContractError::MultipleDenoms {  });}
+                    _ => {return Err(ContractError::InvalidCoin {  });}
+                }
+            },
+        };
+
+        // let expiration = Expiration::AtHeight(env.block.height + 20);
+
+        // A conflict is generated between Expiration from cw-utils and cw20
+        // On state and here we have to use one or the other. But the cw-utils functionality is only available from it.
+
+        let expiration = Duration::Height(20).after(&env.block);
+
 
         //check to see if deposit exists
         match self
@@ -57,6 +82,7 @@ where
                 //add coins to their account
                 deposit.coins.amount = deposit.coins.amount.checked_add(d_coins.amount).unwrap();
                 deposit.count = deposit.count.checked_add(1).unwrap();
+                deposit.stake_time = expiration;
                 self.deposits
                     .save(deps.storage, (&sender, d_coins.denom.as_str()), &deposit)
                     .unwrap();
@@ -67,6 +93,7 @@ where
                     count: 1,
                     owner: info.sender,
                     coins: d_coins.clone(),
+                    stake_time: expiration,
                 };
                 self.deposits
                     .save(deps.storage, (&sender, d_coins.denom.as_str()), &deposit)
@@ -82,6 +109,7 @@ where
     fn execute_withdraw(
         &self,
         deps: DepsMut,
+        env:Env,
         info: MessageInfo,
         amount: u128,
         denom: String,
@@ -92,6 +120,12 @@ where
             .deposits
             .load(deps.storage, (&sender, denom.as_str()))
             .unwrap();
+
+
+        if !deposit.stake_time.is_expired(&env.block) {
+            return Err(ContractError::StakeDurationNotPassed {});
+        }
+
         deposit.coins.amount = deposit
             .coins
             .amount
@@ -122,8 +156,26 @@ where
         owner: String,
         amount: Uint128,
     ) -> Result<Response<C>, ContractError> {
+
+        match nonpayable(&info) {
+            Ok(res) => {},
+            Err(err) => {
+                match err {
+                    PaymentError::NonPayable {  } => {return Err(ContractError::NoFunds {  });}
+                    _ => {return Err(ContractError::InvalidCoin {  });}
+                }
+            },
+        };
+
+        // let expiration = Expiration::AtHeight(env.block.height + 20);
+
+        // A conflict is generated between Expiration from cw-utils and cw20
+        // On state and here we have to use one or the other. But the cw-utils functionality is only available from it.
+
+        let expiration = Duration::Height(20).after(&env.block);
+
         let cw20_contract_address = info.sender.clone().into_string();
-        let expiration = Expiration::AtHeight(env.block.height + 20);
+
         match self
             .cw20_deposits
             .load(deps.storage, (&owner, &cw20_contract_address))
@@ -286,9 +338,9 @@ pub fn execute(
 ) -> Result<Response, ContractError> {
     let contract = Deposit::<Empty>::default();
     match msg {
-        ExecuteMsg::Deposit {} => contract.execute_deposit(deps, info),
+        ExecuteMsg::Deposit {} => contract.execute_deposit(deps, env, info),
         ExecuteMsg::Withdraw { amount, denom } => {
-            contract.execute_withdraw(deps, info, amount, denom)
+            contract.execute_withdraw(deps, env, info, amount, denom)
         }
         ExecuteMsg::Receive(cw20_msg) => receive_cw20(deps, env, info, &contract, cw20_msg),
         ExecuteMsg::ReceiveNft(cw721_msg) => receive_cw721(deps, env, info, &contract, cw721_msg),
@@ -378,8 +430,10 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> Result<Response, ContractError> {
-    unimplemented!()
+pub fn migrate(deps: DepsMut, _env: Env, _msg: MigrateMsg) -> Result<Response, ContractError> {
+    let _original_version = ensure_from_older_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+
+    Ok(Response::default())
 }
 
 pub fn receive_cw20(

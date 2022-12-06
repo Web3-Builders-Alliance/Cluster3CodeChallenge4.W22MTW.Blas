@@ -366,6 +366,7 @@ dependencies = [
  "cosmwasm-storage",
  "cw-multi-test",
  "cw-storage-plus 1.0.0",
+ "cw-utils 1.0.0",
  "cw2 1.0.0",
  "cw20",
  "cw20-base",

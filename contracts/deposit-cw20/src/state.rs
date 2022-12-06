@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
-use cw20::Expiration;
+// use cw20::Expiration;
+use cw_utils::Expiration;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -35,7 +36,8 @@ pub struct Cw20Deposits {
 pub struct Deposits {
     pub count: i32,
     pub owner: Addr,
-    pub coins: Coin
+    pub coins: Coin,
+    pub stake_time:Expiration
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

@@ -24,4 +24,13 @@ pub enum ContractError {
     #[error("Contract does not possess token_id from this cw721 to withdraw")]
     NoCw721ToWithdraw {},
 
+    #[error("No funds sent")]
+    NoFunds {},
+
+    #[error("Multiple denoms sent")]
+    MultipleDenoms {},
+
+    #[error("Coins were sent")]
+    NonPayable {},
+    
 }
